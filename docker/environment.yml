@@ -1,0 +1,16 @@
+name: base
+channels:
+  - bioconda
+  - conda-forge
+dependencies:
+  - snakemake=8.16
+  - bwa=0.7.17
+  - samtools=1.19
+  - gatk4=4.5.0.0
+  - fastqc=0.12.1
+  - fastp=0.23.4
+  - multiqc=1.21
+  - hap.py=0.3.15
+  - bedtools=2.31
+  - pandas
+  - python=3.11

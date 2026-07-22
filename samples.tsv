@@ -1,0 +1,13 @@
+sample	ancestry	population	sex	source_cram_url
+HG00096	EUR	GBR	M	https://ftp.sra.ebi.ac.uk/vol1/run/ERR324/ERR3240114/HG00096.final.cram
+HG00119	EUR	GBR	F	https://ftp.sra.ebi.ac.uk/vol1/run/ERR324/ERR3240194/HG00119.final.cram
+HG00268	EUR	FIN	M	https://ftp.sra.ebi.ac.uk/vol1/run/ERR324/ERR3240225/HG00268.final.cram
+HG02922	AFR	ESN	M	https://ftp.sra.ebi.ac.uk/vol1/run/ERR324/ERR3242482/HG02922.final.cram
+HG03052	AFR	MSL	M	https://ftp.sra.ebi.ac.uk/vol1/run/ERR324/ERR3242467/HG03052.final.cram
+NA19625	AFR	ASW	F	https://ftp.sra.ebi.ac.uk/vol1/run/ERR323/ERR3239893/NA19625.final.cram
+HG03642	SAS	BEB	M	https://ftp.sra.ebi.ac.uk/vol1/run/ERR324/ERR3242669/HG03642.final.cram
+HG03730	SAS	ITU	F	https://ftp.sra.ebi.ac.uk/vol1/run/ERR324/ERR3242703/HG03730.final.cram
+HG04036	SAS	PJL	M	https://ftp.sra.ebi.ac.uk/vol1/run/ERR398/ERR3989235/HG04036.final.cram
+HG00478	EAS	CHS	M	https://ftp.sra.ebi.ac.uk/vol1/run/ERR324/ERR3241681/HG00478.final.cram
+HG00759	EAS	CDX	F	https://ftp.sra.ebi.ac.uk/vol1/run/ERR324/ERR3242128/HG00759.final.cram
+NA18939	EAS	JPT	M	https://ftp.sra.ebi.ac.uk/vol1/run/ERR323/ERR3239557/NA18939.final.cram

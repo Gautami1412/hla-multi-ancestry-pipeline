@@ -1,0 +1,19 @@
+# GIAB reference samples — these carry a NIST "truth" VCF, so they're the
+# only samples we can score precision/recall against. They're run through
+# the IDENTICAL Snakemake pipeline (extract region -> QC -> align -> BQSR ->
+# HaplotypeCaller -> joint genotype -> filter) as the ancestry cohort in
+# samples.tsv, then benchmarked in stage 8.
+#
+# NOTE: There is no GIAB truth sample for African ancestry. HG001 (NA12878)
+# is European (CEU). HG002 is Ashkenazi Jewish (used here as a European-
+# adjacent proxy, NOT a substitute for AFR or SAS truth). HG005 is Han
+# Chinese (EAS). This gap is itself part of the reference-bias story.
+#
+# CRAM source: NIST GIAB FTP, GRCh38-aligned high-coverage CRAMs, e.g.
+#   https://ftp-trace.ncbi.nlm.nih.gov/ReferenceSamples/giab/data/
+# Verify exact per-sample paths with scripts/verify_urls.sh before
+# downloading — GIAB reorganizes directory layout occasionally.
+sample	ancestry	source_cram_url
+HG001	EUR	https://ftp-trace.ncbi.nlm.nih.gov/ReferenceSamples/giab/data/NA12878/NIST_NA12878_HG001_HiSeq_300x/NHGRI_Illumina300X_novoalign_bams/HG001.GRCh38_full_plus_hs38d1_analysis_set_minus_alts.300x.bam
+HG002	AJ_EUR_proxy	https://ftp-trace.ncbi.nlm.nih.gov/ReferenceSamples/giab/data/AshkenazimTrio/HG002_NA24385_son/NIST_HiSeq_HG002_Homogeneity-10953946/NHGRI_Illumina300X_AJtrio_novoalign_bams/HG002.GRCh38.60x.1.bam
+HG005	EAS	https://ftp-trace.ncbi.nlm.nih.gov/ReferenceSamples/giab/data/ChineseTrio/HG005_NA24631_son/HG005_NA24631_son_HiSeq_300x/NHGRI_Illumina300X_Chinesetrio_novoalign_bams/HG005.GRCh38_full_plus_hs38d1_analysis_set_minus_alts.300x.bam
