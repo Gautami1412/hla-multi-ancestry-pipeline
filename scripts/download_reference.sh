@@ -8,7 +8,12 @@ set -euo pipefail
 OUTDIR="resources/reference"
 mkdir -p "$OUTDIR"
 
-BASE="https://storage.googleapis.com/genomics-public-data/resources/broad/hg38/v0"
+# NOTE: the original "genomics-public-data" bucket now 403s for anonymous
+# callers (Google migrated public GATK resources here some time ago).
+BASE="https://storage.googleapis.com/gcp-public-data--broad-references/hg38/v0"
+# Pre-built BWA index for this exact FASTA — pulling these avoids running
+# `bwa index` locally (memory-heavy: ~5-6GB RSS for the full GRCh38 genome).
+EBI="http://ftp.1000genomes.ebi.ac.uk/vol1/ftp/technical/reference/GRCh38_reference_genome"
 
 echo "==> Reference FASTA (+ index + dict)"
 curl -L -o "${OUTDIR}/GRCh38_full_analysis_set_plus_decoy_hla.fa" \
@@ -18,9 +23,15 @@ curl -L -o "${OUTDIR}/GRCh38_full_analysis_set_plus_decoy_hla.fa.fai" \
 curl -L -o "${OUTDIR}/GRCh38_full_analysis_set_plus_decoy_hla.dict" \
   "${BASE}/Homo_sapiens_assembly38.dict"
 
+echo "==> Pre-built BWA index (skips local bwa index)"
+for ext in amb ann bwt pac sa; do
+  curl -L -o "${OUTDIR}/GRCh38_full_analysis_set_plus_decoy_hla.fa.${ext}" \
+    "${EBI}/GRCh38_full_analysis_set_plus_decoy_hla.fa.${ext}"
+done
+
 echo "==> dbSNP"
-curl -L -o "${OUTDIR}/dbsnp_146.hg38.vcf.gz" "${BASE}/Homo_sapiens_assembly38.dbsnp138.vcf"
-gzip -f "${OUTDIR}/dbsnp_146.hg38.vcf.gz" 2>/dev/null || true
+curl -L -o "${OUTDIR}/dbsnp_146.hg38.vcf" "${BASE}/Homo_sapiens_assembly38.dbsnp138.vcf"
+gzip -f "${OUTDIR}/dbsnp_146.hg38.vcf"
 curl -L -o "${OUTDIR}/dbsnp_146.hg38.vcf.gz.tbi" "${BASE}/Homo_sapiens_assembly38.dbsnp138.vcf.idx" || true
 
 echo "==> Mills/1000G gold-standard indels"

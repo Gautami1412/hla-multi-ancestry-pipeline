@@ -59,7 +59,7 @@ bwa:
 
 gatk:
   haplotypecaller_extra: "-ERC GVCF"
-  java_opts: "-Xmx8g"
+  java_opts: "-Xmx3g"
 
 # GATK documented hard-filter defaults (used instead of VQSR — VQSR needs a
 # larger cohort than this demo has).
@@ -93,7 +93,7 @@ paths:
 # ---- AWS (used only by aws/ scripts, not by Snakemake directly) ----------
 aws:
   region: "us-east-1"
-  s3_bucket: "CHANGE-ME-hla-pipeline-<your-aws-account-id>"
+  s3_bucket: "hla-pipeline-874186497878"
   batch_job_queue: "hla-pipeline-queue"
   batch_job_definition: "hla-pipeline-jobdef"
   ecr_repo: "hla-pipeline"

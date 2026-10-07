@@ -14,14 +14,30 @@ REF="resources/reference/GRCh38_full_analysis_set_plus_decoy_hla.fa"
 BED="resources/regions/hla_extended.bed"
 REGION=$(awk '{print $1":"$2"-"$3}' "$BED")
 
+# Some source hosts (esp. NCBI's legacy ftp-trace server) have been seen to
+# accept the connection and then stall indefinitely with zero throughput —
+# htslib's libcurl backend has no read-timeout of its own, so a stalled
+# transfer hangs forever instead of failing. `timeout` bounds each sample to
+# a fixed wall-clock budget so a stall surfaces as a clear failure.
+DOWNLOAD_TIMEOUT_SECS="${DOWNLOAD_TIMEOUT_SECS:-2700}"
+
 download_one() {
   local sample="$1" url="$2"
+  local out="resources/cram/${sample}.full.cram"
+  if [[ -s "$out" && -s "${out}.crai" ]]; then
+    echo "==> ${sample}: already downloaded, skipping"
+    return 0
+  fi
   echo "==> ${sample}: slicing ${REGION} from ${url}"
   # samtools view can read directly over HTTPS; -T supplies the reference
   # for CRAM decoding. Output is already the sliced "full.cram" the
   # Snakemake rule 01_extract_region.smk expects.
-  samtools view -C -T "$REF" -o "resources/cram/${sample}.full.cram" "$url" "$REGION"
-  samtools index "resources/cram/${sample}.full.cram"
+  if ! timeout -k 30 "$DOWNLOAD_TIMEOUT_SECS" samtools view -C -T "$REF" -o "$out" "$url" "$REGION"; then
+    echo "==> ${sample}: FAILED (timed out after ${DOWNLOAD_TIMEOUT_SECS}s or errored — possible stalled connection)" >&2
+    rm -f "$out"
+    return 1
+  fi
+  samtools index "$out"
 }
 
 echo "==> Cohort samples"
