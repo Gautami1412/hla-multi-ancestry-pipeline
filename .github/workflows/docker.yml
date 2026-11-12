@@ -17,14 +17,21 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+      - uses: aws-actions/amazon-ecr-login@v2
       - uses: docker/build-push-action@v6
         with:
           context: .
           file: docker/Dockerfile
           push: true
-          tags: ghcr.io/gautami1412/hla-pipeline:latest
+          tags: |
+            ghcr.io/gautami1412/hla-pipeline:latest
+            874186497878.dkr.ecr.us-east-1.amazonaws.com/hla-pipeline:latest
       - name: Check the tools work
         run: |
           docker run --rm ghcr.io/gautami1412/hla-pipeline:latest snakemake --version
-          docker run --rm ghcr.io/gautami1412/hla-pipeline:latest bwa 2>&1 | head -3
           docker run --rm ghcr.io/gautami1412/hla-pipeline:latest gatk --version
