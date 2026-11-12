@@ -27,6 +27,11 @@ RUN micromamba install -y -n base -f /tmp/environment.yml \
     && micromamba clean --all --yes
 
 ENV PATH=/opt/conda/bin:$PATH
+COPY Snakefile samples.tsv giab_samples.tsv /work/
+COPY config /work/config
+COPY rules /work/rules
+COPY scripts /work/scripts
+COPY envs /work/envs
 SHELL ["/bin/bash", "-c"]
 
 ENTRYPOINT ["/usr/local/bin/_entrypoint.sh"]
