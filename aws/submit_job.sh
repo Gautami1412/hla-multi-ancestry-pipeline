@@ -11,7 +11,7 @@ JOBDEF=$(grep -A6 "^aws:" config/config.yaml | grep batch_job_definition | awk '
 BUCKET=$(grep -A6 "^aws:" config/config.yaml | grep s3_bucket | awk '{print $2}' | tr -d '"')
 
 CMD="aws s3 sync s3://${BUCKET}/resources /work/resources && \
-     snakemake --cores 4 --use-conda ${TARGET} && \
+     snakemake --cores 4 ${TARGET} && \
      aws s3 sync /work/results s3://${BUCKET}/results"
 
 echo "==> Submitting job: target=${TARGET}"
