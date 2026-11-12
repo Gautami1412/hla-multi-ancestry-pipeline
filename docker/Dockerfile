@@ -26,6 +26,10 @@ COPY docker/environment.yml /tmp/environment.yml
 RUN micromamba install -y -n base -f /tmp/environment.yml \
     && micromamba clean --all --yes
 
+RUN micromamba create -y -n happy -c bioconda -c conda-forge hap.py=0.3.15 \
+    && micromamba clean --all --yes
+RUN printf '#!/bin/bash\nexec micromamba run -n happy hap.py "$@"\n' > /usr/local/bin/hap.py \
+    && chmod +x /usr/local/bin/hap.py
 ENV PATH=/opt/conda/bin:$PATH
 COPY Snakefile samples.tsv giab_samples.tsv /work/
 COPY config /work/config
