@@ -35,3 +35,4 @@ jobs:
         run: |
           docker run --rm ghcr.io/gautami1412/hla-pipeline:latest snakemake --version
           docker run --rm ghcr.io/gautami1412/hla-pipeline:latest gatk --version
+          docker run --rm ghcr.io/gautami1412/hla-pipeline:latest hap.py --version
