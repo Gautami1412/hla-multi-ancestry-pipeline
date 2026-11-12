@@ -1,0 +1,14 @@
+name: Diagnose hap.py
+on: workflow_dispatch
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: mamba-org/setup-micromamba@v2
+      - name: Try building the hap.py environment
+        shell: bash -l {0}
+        run: |
+          micromamba create -y -n t -c bioconda -c conda-forge hap.py=0.3.15 bedtools=2.31 || echo CREATE_FAILED
+          micromamba run -n t which hap.py || echo NO_HAPPY_ON_PATH
+          micromamba run -n t sh -c 'ls $CONDA_PREFIX/bin | grep -i -E "hap|qfy|pre.py"' || echo NO_BINS
+          micromamba search -c bioconda -c conda-forge hap.py | tail -12
