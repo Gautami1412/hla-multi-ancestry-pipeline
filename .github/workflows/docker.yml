@@ -1,0 +1,30 @@
+name: Build Docker image
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["docker/**"]
+permissions:
+  contents: read
+  packages: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: true
+          tags: ghcr.io/gautami1412/hla-pipeline:latest
+      - name: Check the tools work
+        run: |
+          docker run --rm ghcr.io/gautami1412/hla-pipeline:latest snakemake --version
+          docker run --rm ghcr.io/gautami1412/hla-pipeline:latest bwa 2>&1 | head -3
+          docker run --rm ghcr.io/gautami1412/hla-pipeline:latest gatk --version
