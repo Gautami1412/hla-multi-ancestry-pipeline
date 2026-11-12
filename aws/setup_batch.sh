@@ -55,7 +55,8 @@ aws batch register-job-definition \
   --platform-capabilities FARGATE \
   --container-properties "{
     \"image\": \"${IMAGE_URI}\",
-    \"resourceRequirements\": [{\"type\":\"VCPU\",\"value\":\"4\"},{\"type\":\"MEMORY\",\"value\":\"8192\"}],
+     \"ephemeralStorage\": {\"sizeInGiB\": 100},
+    \"resourceRequirements\": [{\"type\":\"VCPU\",\"value\":\"4\"},{\"type\":\"MEMORY\",\"value\":\"16384\"}],
     \"executionRoleArn\": \"${ROLE_ARN}\",
     \"jobRoleArn\": \"${ROLE_ARN}\",
     \"networkConfiguration\": {\"assignPublicIp\": \"ENABLED\"}
