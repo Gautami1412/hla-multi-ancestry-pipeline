@@ -1,42 +1,42 @@
 # HLA Multi-Ancestry Variant Calling Pipeline
 
-Does GATK's standard variant-calling pipeline work equally well across
-ancestries in the HLA region — the most diverse, most reference-biased
-part of the human genome? This repo runs the full GATK Best Practices
-workflow (QC → align → BQSR → call → joint genotype → filter → benchmark)
-on 1000 Genomes samples from four ancestry superpopulations, restricted to
-the extended HLA locus on chr6, and scores accuracy against GIAB truth
-sets — separately per ancestry — to measure the gap directly.
+I built this project to test whether GATK's standard variant-calling workflow works equally well across ancestries in the HLA region, which is the most diverse and most reference-biased part of the human genome. The pipeline runs the full GATK Best Practices workflow (QC, alignment, base recalibration, variant calling, joint genotyping, filtering, benchmarking) on 1000 Genomes samples from four ancestry superpopulations. The analysis is restricted to the extended HLA locus on chromosome 6, and accuracy is scored against Genome in a Bottle (GIAB) truth sets, separately for each ancestry, so the gap can be measured directly.
 
-This README assumes you've never used Snakemake, Docker, or AWS. Read it
-top to bottom once before running anything.
+The workflow is orchestrated with Snakemake, packaged in a Docker image that GitHub Actions builds and tests, and executed on AWS Batch. This README documents the design, the order I ran things in, what is finished, and what is still in progress
+
+---
+
+## Project status: 
+
+### Finished
+
+- I wrote the full 8-stage Snakemake pipeline. A dry run resolves all ~200 steps with no missing inputs.
+- I downloaded and indexed the reference genome (GRCh38 with decoys), dbSNP, the Mills indel set, the GIAB truth sets, and the HLA-region data for all 15 samples (12 from 1000 Genomes and 3 from GIAB).
+- I built a Docker image with every tool the pipeline needs. GitHub Actions builds and tests it on each change to ```docker/```, then publishes it to GitHub Container Registry and to AWS ECR.
+- I set up AWS: a private S3 bucket (about 11.8 GiB of reference data and samples uploaded), an ECR repository, and an AWS Batch environment on Fargate with a job queue and job definition (4 vCPU, 16 GB memory, 100 GB temporary disk).
+- I tested on one sample (alignment, then recalibration and variant calling) before launching the full cohort.
+- The full-cohort run on AWS Batch completed 195 of 200 steps. That covers region extraction, QC, alignment, duplicate marking, recalibration, variant calling, joint genotyping, and hard filtering for all 15 samples. The final filtered cohort VCF exists.
+
+### In progress
+
+The last stage, hap.py benchmarking, stopped on an argument error: hap.py's ```--stratification``` option expects one table file, and I passed it a comma-separated list of region files. I identified the fix (a small ```strat.tsv``` listing the stratification files) and am applying it, then rerunning.
+
+### Results
+
+Final accuracy numbers (precision, recall, F1 per ancestry) are pending the benchmarking rerun. I have not drawn any conclusions about accuracy yet.
+One finding already stands: GIAB truth sets cover only 2 of my 4 ancestry groups (see section 4).
 
 ---
 
 ## 1. What each tool is actually for here
 
-**Snakemake** is the workflow engine. Instead of you manually running 8
-tools in the right order for 15 samples (120+ commands, easy to mess up
-or forget which files are stale), you describe each step once as a
-*rule* — "this command turns file A into file B" — and Snakemake figures
-out the dependency graph, runs steps in parallel where possible, and
-skips anything already up to date. The `rules/*.smk` files in this repo
-are the 8 pipeline stages; `Snakefile` wires them together.
+**Snakemake** is the workflow engine. Running 8 tools in the right order for 15 samples by hand means 120+ commands, and it is easy to run something out of order or forget which files are out of date. Instead, I describe each step once as a rule ("this command turns file A into file B"). Snakemake works out the dependency graph, runs independent steps in parallel, and skips anything already up to date. The ```rules/*.smk``` files are the pipeline stages, and ```Snakefile``` ties them together.
 
-**Docker** solves "it works on my machine." GATK, BWA, samtools, hap.py
-etc. all need specific versions and can be a pain to install correctly.
-`docker/Dockerfile` builds one image with everything pinned and working,
-so the pipeline runs identically on your laptop, a colleague's laptop,
-or in the cloud.
+**Docker** removes the "it works on my machine" problem. GATK, BWA, samtools, hap.py and the rest need specific versions and can be difficult to install together. ```docker/Dockerfile``` builds a single image with all of them pinned, plus the pipeline code, so the pipeline runs the same way on a laptop, a colleague's machine, or the cloud.``` hap.py``` needs an old Python (2.7), so it lives in its own environment inside the image, reached through a small launcher script.
 
-**AWS** is only for when your laptop isn't enough — either compute
-(alignment/calling is CPU-heavy) or you want a run you can point
-someone else at without them installing anything. Everything in this
-project works fully locally first; AWS is optional and additive.
+**GitHub Actions** builds the image. My laptop does not have enough memory to build and test it reliably, so ```.github/workflows/docker.yml``` builds it on GitHub's computers, checks that Snakemake and GATK run inside it, and pushes it to the registries.
 
-**Claude Code** (which you already have in VS Code) is how you'll
-actually *drive* all of this — see §6 below for the specific prompts to
-give it at each phase, rather than typing every command by hand.
+**AWS** supplies the memory my laptop lacks. BWA needs about 6 GB for the genome index, and my laptop had less than that available. S3 stores the data and results, ECR stores the image, IAM controls permissions, and Batch on Fargate runs the job on rented computers that exist only while the job runs.
 
 ---
 
@@ -45,7 +45,7 @@ give it at each phase, rather than typing every command by hand.
 ```
 hla-multi-ancestry-pipeline/
 ├── Snakefile                  # entry point, wires up all 8 stages
-├── config/config.yaml         # all tunable parameters live here
+├── config/config.yaml         # all tunable parameters
 ├── samples.tsv                # cohort: AFR/EUR/SAS/EAS samples
 ├── giab_samples.tsv           # GIAB truth-set samples (HG001/HG002/HG005)
 ├── rules/                     # one .smk file per pipeline stage
@@ -58,79 +58,70 @@ hla-multi-ancestry-pipeline/
 │   ├── 06_joint_genotype.smk  #   CombineGVCFs, GenotypeGVCFs
 │   ├── 07_filter.smk          #   GATK hard filters
 │   └── 08_benchmark.smk       #   hap.py vs GIAB, per ancestry
-├── envs/                      # conda environments (local, non-Docker runs)
+├── envs/                      # conda environments for non-Docker runs
 ├── scripts/                   # download + helper scripts, aggregation
-├── docker/                    # Dockerfile + build/push script
-└── aws/                       # SETUP.md + S3/Batch automation scripts
+├── docker/                    # Dockerfile + environment.yml
+├── aws/                       # S3, Batch, and job-submission scripts
+└── .github/workflows/         # GitHub Actions: Docker image build and test
 ```
 
-`resources/`, `results/`, `logs/`, `benchmarks/` are created by the
-scripts/pipeline itself and are gitignored — they hold multi-GB genomic
-files that shouldn't go in version control.
+```resources/```, ```results/```, ```logs/``` and ```benchmarks/``` are created by the scripts and the pipeline. They are gitignored because they hold multi-GB genomic files that do not belong in version control.
 
 ---
 
-## 3. Why the region is restricted to HLA (and why samples get sliced from CRAMs)
+## 3. Why the analysis is restricted to HLA, and why I slice samples from CRAMs
 
-Full whole-genome alignment of even 12 samples is a multi-day, many-CPU
-job — not a reasonable demo. Since the actual question is about the HLA
-region specifically, stage 1 pulls only the extended HLA interval
-(chr6:28,510,120-33,480,577, GRCh38) out of each sample's publicly
-hosted, already-aligned 1000 Genomes high-coverage CRAM, converts that
-back to FASTQ, and the rest of the pipeline (QC → trim → realign → BQSR
-→ call) runs on that exactly as it would on whole-genome data — just at
-~1/500th the size. This is a standard approach for regional re-analysis
-and is called out here so it isn't mistaken for full WGS best practices.
+Whole-genome alignment of 15 samples is a multi-day, many-CPU job. The question I care about concerns the HLA region, so stage 1 pulls only the extended HLA interval (chr6:28,510,120-33,480,577, GRCh38) from each sample's public, already-aligned CRAM file and converts those reads back to FASTQ. From there, the pipeline (QC, trimming, re-alignment, recalibration, calling) runs exactly as it would on whole-genome data, at roughly 1/500th of the size. This is a standard approach for regional re-analysis. It is a compute-feasibility choice, and it is not the same as a full whole-genome clinical pipeline.
+
+I align to the full GRCh38 reference with decoy sequences, not to an HLA-only reference. HLA genes resemble each other closely, so a small reference would force reads into the wrong places and make the benchmark look better or worse than it should. A full reference gives those reads somewhere else to go.
 
 ---
 
-## 4. The reference-bias gap, spelled out before you run anything
+## 4.The reference-bias gap
 
-GIAB "truth" (gold-standard, hand-curated) VCFs exist for only a handful
-of individuals: HG001/NA12878 (European), the HG002-004 Ashkenazi trio,
-and HG005-007 (Han Chinese). **There is no GIAB truth set for African or
-South Asian ancestry.** That means:
+GIAB truth sets (hand-curated gold-standard variant calls) exist for only a handful of individuals: HG001/NA12878 (European), the HG002-004 Ashkenazi trio, and HG005-007 (Han Chinese). No GIAB truth set exists for African or South Asian ancestry. Consequences for this project:
 
-- HG001 (EUR) and HG005 (EAS) in `giab_samples.tsv` can be scored for
-  precision/recall/F1 in stage 8.
-- HG002 is included as an Ashkenazi/European-adjacent proxy, not a
-  substitute for AFR/SAS truth.
-- The AFR and SAS samples in `samples.tsv` go through the *entire*
-  pipeline identically, but **cannot be benchmarked against ground
-  truth at all** — because none exists. `scripts/aggregate_benchmark.py`
-  records this explicitly as `has_truth_set=False` rows rather than
-  silently omitting them.
+- HG001 (EUR) and HG005 (EAS) in ```giab_samples.tsv``` can be scored for precision, recall and F1 in stage 8.
+- HG002 is included as an Ashkenazi, European-adjacent proxy. It is not a substitute for African or South Asian truth.
+- The African and South Asian samples in ```samples.tsv``` go through the same pipeline, but cannot be benchmarked against ground truth because none exists. ```scripts/aggregate_benchmark.py``` records them explicitly as ```has_truth_set=False``` rows instead of omitting them.
 
-That absence is not a bug to fix — it's the first half of the finding.
-The second half is whatever recall/precision gap shows up between HG001
-(EUR) and HG005 (EAS) once you run stage 8.
+That absence is the first half of the finding. The second half is the precision and recall gap, if any, between HG001 (EUR) and HG005 (EAS) once stage 8 completes. With one scored sample per ancestry, any gap I see suggests a pattern but doesn't prove one.
 
 ---
 
 ## 5. Execution order
 
-Run everything from the repo root.
+All commands were run from the repository root.
 
+One-time setup (data)
 ```bash
-# One-time setup
 bash scripts/make_region_bed.sh          # writes resources/regions/hla_extended.bed
-bash scripts/download_reference.sh       # GRCh38 FASTA, dbSNP, Mills indels (~3-4 GB)
-bash scripts/download_giab.sh            # GIAB truth VCFs + confident BEDs + stratification BEDs
-bash scripts/verify_urls.sh              # check sample URLs resolve BEFORE the big download
-bash scripts/download_samples.sh         # slices HLA region from each sample's CRAM
+bash scripts/download_reference.sh       # GRCh38 FASTA, BWA index, dbSNP, Mills indels
+bash scripts/download_giab.sh            # GIAB truth VCFs, confident BEDs, stratification BEDs
+bash scripts/verify_urls.sh              # check sample URLs resolve before the big download
+bash scripts/download_samples.sh         # slices the HLA region from each sample's CRAM
+```
 
-# Sanity-check the DAG before spending any compute
+Check the dependency graph before spending compute
+```bash
 snakemake -n --cores 4
+```
 
-# Local run (conda-managed environments, defined in envs/)
+Local run with conda environments (needs about 6 GB free memory for alignment)
+```bash
 snakemake --cores 8 --use-conda
+```
 
-# OR: local run inside Docker (no conda install needed)
+Local run inside Docker
+```bash
 docker build -t hla-pipeline:latest -f docker/Dockerfile .
 docker run --rm -v $(pwd):/work -w /work hla-pipeline:latest \
     snakemake --cores 8 --use-conda
+```
+The image already contains the tools, so ```--use-conda``` is not needed here.
 
-# OR: AWS (see aws/SETUP.md first — one-time account setup)
+AWS Batch run
+```bash
 bash docker/build_and_push.sh
 bash aws/create_s3_bucket.sh
 bash aws/setup_batch.sh
@@ -138,84 +129,57 @@ bash aws/submit_job.sh all
 ```
 
 Final outputs:
-- `results/qc/multiqc_report.html` — aggregated QC across all samples
-- `results/filtered/cohort.filtered.vcf.gz` — joint-called, hard-filtered cohort VCF
-- `results/benchmark/ancestry_stratified_report.tsv` — the actual finding: precision/recall/F1 per ancestry, plus which samples had no truth set at all
+- ```results/qc/multiqc_report.html```: aggregated QC across all samples
+- ```results/filtered/cohort.filtered.vcf.gz```: the joint-called, hard-filtered cohort VCF
+- ```results/benchmark/ancestry_stratified_report.tsv```: precision, recall and F1 per ancestry, plus the samples with no truth set
+
+## 6. How I built it, in phases
+
+I worked in phases because genomics pipelines fail in ways that are much easier to isolate one stage at a time.
+
+- **Scaffold and dry run**: I checked that paths and wildcards were consistent and used snakemake -n to confirm the dependency graph resolved.
+- **Real data**: I verified every download URL, corrected the ones that had moved, and added retries, timeouts and resume to the download scripts.
+- **One sample end to end**: I did not run the full cohort until a single sample worked.
+- **Local compute attempt**: Alignment ran out of memory on my laptop, which is what pushed the work to the cloud.
+- **Containerization**: I wrote the Dockerfile, then moved the build to GitHub Actions and added tool checks to it.
+- **AWS**: I set up storage, the registry, and Batch, and tested one sample on the cloud before running the cohort.
+- **Full cohort run**: The run reached 195 of 200 steps. Benchmarking is the remaining stage.
+- **Write-up**: This happens once the benchmarking results exist.
 
 ---
 
-## 6. How to actually drive this with Claude Code in VS Code
+## 7. Problems I hit and how I fixed them
 
-Open this folder in VS Code, open the Claude Code panel, and work
-through it in phases rather than asking for everything at once —
-genomics pipelines fail in ways that are much easier to debug one stage
-at a time.
-
-**Phase 1 — verify the scaffold and fill gaps.**
-> "Read through the Snakefile and rules/*.smk in this repo. Check the
-> file paths and wildcards are internally consistent, and run
-> `snakemake -n --cores 4` to dry-run the DAG. Fix anything that's
-> broken."
-
-**Phase 2 — get real data flowing.**
-> "Run scripts/verify_urls.sh. For any FAIL rows, look up the correct
-> current URL on the 1000 Genomes / GIAB FTP index (linked in the
-> script's error output) and fix samples.tsv or giab_samples.tsv."
-
-**Phase 3 — run one sample end to end first.**
-> "Before running the full cohort, get just HG00096 through stages 1-7
-> (`snakemake --cores 4 --use-conda results/dedup/HG00096.dedup.bam` then
-> extend the target one stage at a time). Show me each stage's log if
-> anything fails."
-
-**Phase 4 — scale to the full cohort.**
-> "Now run `snakemake --cores 8 --use-conda` for the full target list in
-> `rule all`. Monitor for failures and summarize any errors."
-
-**Phase 5 — Docker parity check.**
-> "Build the Docker image from docker/Dockerfile and re-run the dry run
-> (`snakemake -n`) inside the container to confirm it matches the conda
-> run."
-
-**Phase 6 — AWS (optional, once local works end-to-end).**
-> "Walk me through aws/SETUP.md step by step, pausing after each AWS CLI
-> command so I can confirm it in the console before continuing."
-
-**Phase 7 — the write-up.**
-> "Read results/benchmark/ancestry_stratified_report.tsv and summarize:
-> which ancestry groups had a matched GIAB truth set, what precision/
-> recall/F1 looked like for HG001 vs HG005, and what the complete
-> absence of AFR/SAS truth data means for interpreting this result.
-> Draft that as the reference-bias findings section."
-
-Keep each Claude Code session scoped to one phase — it makes failures
-easier to isolate and keeps the diffs reviewable.
+| Problem | How I diagnosed it | Fix |
+|---|---|---|
+| Dry run failed on missing `.fai` and `.dict` files | GATK and samtools need these beside the reference, but my rules never declared them as inputs, so Snakemake did not build them first | Added them as explicit rule inputs |
+| Corrupted region BED file | The script searched for `end` and also matched it inside "HLA_extended" | Anchored the search to the exact config keys |
+| Downloads stalled or reset | Public servers drop long connections | Added retries, resume (`curl -C -`), timeouts, and skip-if-already-downloaded |
+| Sample and GIAB URLs returned 404 | Public indexes had been reorganized | Looked up current locations and updated the sample sheets |
+| Disk space ran out on the system drive | WSL was storing its disk there | Moved the Linux environment to a larger drive |
+| BWA killed for lack of memory | The genome index needs about 6 GB and my laptop had less | Moved the compute stages to AWS Batch |
+| The container had the tools but not my pipeline code | I read the job scripts before running them and saw nothing copied the Snakefile and rules in | Added `COPY` steps to the Dockerfile |
+| Cloud job too small | Reference files exceed the default 20 GB job disk, and BWA is tight at 8 GB | Raised the job to 16 GB memory and a 100 GB temporary disk |
+| Batch setup reported "queue already exists" when it did not | The script hides errors, and the queue failed because the compute environment was not ready yet | Checked each resource directly and created the queue by hand |
+| Recalibration failed with no visible reason | The real error was in a log file that disappeared with the container | Changed the job to copy logs to S3 even on failure, then read the error |
+| `Invalid GZIP header` on the dbSNP index | Both data files passed `gzip -t`, but the dbSNP index failed. The deeper cause was that the dbSNP file was gzip, not BGZF, which GATK needs for random access | Recompressed with `bgzip`, rebuilt the index with `tabix`, re-uploaded |
+| `hap.py: command not found` in the cloud job | hap.py had been left out of the image's main environment because it needs Python 2.7 | Installed it in its own environment in the image with a launcher, and added a version check to the build |
+| hap.py failed on `--stratification` | It expects a table file, and I gave it a comma-separated list | Creating a small `strat.tsv` and pointing the config at it (in progress) |
 
 ---
 
-## 7. Known simplifications (say these out loud in your write-up)
+## 8. Known simplifications
 
-- **Hard filters, not VQSR.** GATK's Variant Quality Score Recalibration
-  needs a much larger cohort than 12-15 samples to train on. This repo
-  uses GATK's documented hard-filter thresholds instead
-  (`config.yaml > hard_filters`); VQSR is the production-scale path.
-- **CombineGVCFs, not GenomicsDBImport.** Fine at this cohort size;
-  GenomicsDBImport is the scale-up alternative for hundreds+ of samples.
-- **Region-sliced CRAMs, not raw WGS FASTQ.** See §3 — chosen for
-  compute feasibility, not because it's how you'd run this in production.
-- **hap.py, not RTG vcfeval.** Either is standard; hap.py was chosen for
-  the built-in GIAB stratification-BED support.
-- **Sample list is illustrative.** The exact ENA run accessions in
-  `samples.tsv` should be re-verified against the current 1000 Genomes
-  index (`scripts/verify_urls.sh`) — these indexes get reorganized.
+- Hard filters, not VQSR. VQSR needs a much larger cohort than 15 samples to train on. I used GATK's documented hard-filter thresholds (```config.yaml > hard_filters```). VQSR is the production-scale path.
+- CombineGVCFs, not GenomicsDBImport. This is fine at this cohort size. GenomicsDBImport is the scale-up alternative for hundreds of samples.
+- Region-sliced CRAMs, not raw whole-genome FASTQ. See section 3. I chose this for compute feasibility.
+- hap.py, not RTG vcfeval. Both are standard. I chose hap.py for its built-in support for GIAB stratification files.
+- One scored sample per ancestry. HG001 for European and HG005 for East Asian, so results are suggestive and not statistically conclusive.
 
 ---
 
-## 8. Cost and time expectations
+## 9. Cost and time
 
-- Local (conda or Docker), 12-15 samples restricted to HLA: a few hours
-  on a modern laptop, dominated by BWA alignment and HaplotypeCaller.
-- AWS Fargate Batch: low single-digit dollars for a full cohort run,
-  plus a few cents of S3 storage. See `aws/SETUP.md > Cost expectations`.
-- The one-time reference/dbSNP/Mills/GIAB downloads are a few GB total —
-  do this once, not per run.
+- Local run with conda or Docker on 12-15 samples restricted to HLA: a few hours on a modern laptop, dominated by BWA alignment and HaplotypeCaller, provided about 6 GB of memory is available for alignment.
+- AWS Batch (Fargate): the full cohort ran in roughly two hours at 4 vCPU and 16 GB, which comes to an estimated one to two dollars of compute, plus a few cents of S3 storage. I will replace this estimate with the actual cost from the billing page.
+- The one-time reference downloads total a few GB and are kept in S3, so they are not repeated for each run.
