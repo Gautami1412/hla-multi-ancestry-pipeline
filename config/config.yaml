@@ -80,8 +80,7 @@ hard_filters:
 # ---- Benchmarking (hap.py) ------------------------------------------------
 happy:
   stratification_beds:
-    - "resources/giab/stratification/LowComplexity.bed.gz"
-    - "resources/giab/stratification/SegmentalDuplications.bed.gz"
+    - "resources/giab/stratification/strat.tsv"
 
 # ---- Paths ---------------------------------------------------------------
 paths:
