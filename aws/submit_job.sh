@@ -20,7 +20,7 @@ aws batch submit-job \
   --job-name "hla-pipeline-$(date +%s)" \
   --job-queue "${QUEUE}" \
   --job-definition "${JOBDEF}" \
-  --container-overrides "command=[\"bash\",\"-lc\",\"${CMD}\"]" \
+  --container-overrides "command=[\"bash\",\"-c\",\"${CMD}\"]" \
   --region "${AWS_REGION}"
 
 echo "==> Track status with:"
