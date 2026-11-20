@@ -1,90 +1,101 @@
-# AWS setup (first time, from zero)
+# AWS setup
 
-You don't need AWS for stages 1-8 to run — everything above works fully
-locally with Docker or conda. AWS is only for when your laptop can't keep
-up, or you want a repeatable, sharable cloud run. Do this section last.
+This is how I set up AWS for the project, in the order I did it. I used AWS because BWA needs about 6 GB of memory to align and my laptop did not have that free. Fargate bills only while a job is running, so nothing keeps costing money between runs.
 
-## 1. Create an account and lock down billing
+## 1. Account and billing
 
-1. Go to https://aws.amazon.com and create an account (needs a credit
-   card, but everything in this project fits comfortably in the AWS Free
-   Tier plus a few dollars of Batch compute time).
-2. Immediately set a budget alarm so you can't get surprised:
-   - Console → Billing → Budgets → Create budget → "Cost budget" →
-     set a monthly amount (e.g. $20) → add your email as an alert at 80%
-     and 100%.
-3. Do not use your root account for day-to-day work. Create an IAM user:
-   - Console → IAM → Users → Create user → name it e.g. `hla-pipeline` →
-     attach policies directly: `AmazonS3FullAccess`, `AmazonEC2ContainerRegistryFullAccess`,
-     `AWSBatchFullAccess`, `IAMReadOnlyAccess` (scope these down later —
-     these are demo-friendly, not least-privilege).
-   - Create an access key for this user (IAM → Users → your user →
-     Security credentials → Create access key → "Command Line Interface").
+I made an AWS account and set a budget alert in Billing, then Budgets, at $20 so a mistake could not get expensive. New accounts can be restricted. My first new account could not create S3 buckets because of an AWS Organizations policy I had no way to change, so I used an older account of mine instead. If S3 gives `AccessDenied` on a brand-new account, a support case is the way out.
 
-## 2. Install and configure the AWS CLI locally
+## 2. IAM user and the AWS CLI
+
+I work as an IAM user, not the root account, with access to S3, ECR and Batch. The AWS CLI is installed in Ubuntu (WSL). I install it from `/tmp` because the installer unpacks a folder called `aws`, which would clash with this repo's `aws/` folder:
 
 ```bash
-# macOS
-brew install awscli
-# or Linux
-curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && unzip awscliv2.zip && sudo ./aws/install
-
-aws configure
-# AWS Access Key ID: <paste>
-# AWS Secret Access Key: <paste>
-# Default region name: us-east-1   (or whatever you set in config/config.yaml)
-# Default output format: json
-```
-
-Verify it works:
-```bash
+cd /tmp
+curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscliv2.zip
+unzip -q awscliv2.zip && sudo ./aws/install
+aws configure          # access key, secret key, region us-east-1, output json
 aws sts get-caller-identity
 ```
 
-## 3. Create the S3 bucket (stores reference files + results)
+## 3. S3 bucket
 
-Edit `config/config.yaml` → `aws.s3_bucket` to something globally unique,
-e.g. `hla-pipeline-yourname-2026`, then:
+The bucket name is `aws.s3_bucket` in `config/config.yaml`. Bucket names are global, so it has to be unique.
 
 ```bash
 bash aws/create_s3_bucket.sh
 ```
 
-## 4. Build and push the Docker image to ECR
+## 4. Reference files and data
+
+From the repo root:
 
 ```bash
-bash docker/build_and_push.sh
+bash scripts/make_region_bed.sh
+bash scripts/download_reference.sh
+bash scripts/make_no_alt_reference.sh
+bash scripts/download_giab.sh
+bash scripts/download_samples.sh
+aws s3 sync resources s3://<bucket>/resources
 ```
 
-## 5. Set up AWS Batch (compute environment, queue, job definition)
+`make_no_alt_reference.sh` removes the 261 `*_alt` contigs from the reference. I need this because with them left in, BWA gives HLA-region reads mapping quality 0 and GATK throws them away.
+
+The BWA index for the cleaned reference is built once on AWS, not on my laptop, once the FASTA is in S3:
+
+```bash
+bash aws/build_reference_index.sh
+```
+
+It takes about an hour and prints a job ID. When the job has `SUCCEEDED`, the index files are in S3 next to the FASTA.
+
+## 5. Docker image
+
+GitHub Actions builds the image and pushes it to GitHub Container Registry and to ECR. It runs when something in `docker/` changes, or by hand: Actions tab, Build Docker image, Run workflow. It needs two repository secrets, `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`, for an IAM user that can only push to ECR.
+
+`docker/build_and_push.sh` does the same thing from a machine that has Docker.
+
+The Snakefile, rules, scripts and config are copied into the image, so I rebuild it after changing any of them. A Batch job always runs whatever is in the image, not what is on my laptop.
+
+## 6. AWS Batch
 
 ```bash
 bash aws/setup_batch.sh
 ```
 
-This creates a Fargate-based Batch compute environment (no EC2 instances
-to manage or forget to shut down — Fargate only bills while a job runs).
-
-## 6. Submit a job
+This creates the Fargate compute environment, the job queue and the job definition (4 vCPU, 16 GB memory, 100 GiB temporary disk). The script hides some errors. Once I got "queue already exists, skipping" when the queue had never been created, because the compute environment was not ready yet. I check it afterwards:
 
 ```bash
-bash aws/submit_job.sh <snakemake-rule-or-target>
+aws batch describe-job-queues --region us-east-1 --query "jobQueues[].[jobQueueName,state,status]" --output table
 ```
 
-## 7. Tear down when done (avoid ongoing charges)
+## 7. Running jobs
+
+I run one sample first as a test, then the full cohort:
 
 ```bash
-bash aws/teardown.sh
+bash aws/submit_job.sh results/gvcf/HG001.g.vcf.gz
+bash aws/submit_job.sh
 ```
 
-This deletes the Batch compute environment/queue/job definition and
-empties+deletes the S3 bucket. It does NOT delete your IAM user or ECR
-image — remove those manually in the console if you want a full wipe.
+Each prints a job ID. To see how far a job has got:
 
-## Cost expectations
+```bash
+JOB=<job id>
+LOG=$(aws batch describe-jobs --jobs $JOB --region us-east-1 --query "jobs[0].container.logStreamName" --output text)
+aws logs tail /aws/batch/job --log-stream-names "$LOG" --since 3h --region us-east-1 | grep -E "Error in rule|steps \(|Exiting" | tail -3
+```
 
-Because everything is restricted to the HLA region (~5 Mb) rather than
-whole-genome, expect this to cost low single-digit dollars in Batch
-Fargate compute for a full 12-15 sample cohort run, plus a few cents of
-S3 storage. The reference/dbSNP/Mills downloads are the biggest one-time
-transfer (a few GB) — do that once and keep it in S3, not repeatedly.
+The job copies `logs/` and `results/` to S3 when it finishes, including when it fails, so I can read the real error afterwards. I download the results with:
+
+```bash
+aws s3 sync s3://<bucket>/results results
+```
+
+## 8. Cleaning up
+
+`bash aws/teardown.sh` deletes the Batch queue, compute environment and job definition, and empties and deletes the S3 bucket. It does not delete the IAM users or the ECR repository, so I remove those in the console.
+
+## Cost
+
+The first full cohort run took about 2 hours and I estimate $1 to $2 of Fargate compute, plus a few cents of S3 storage. The one-off reference index job adds about an hour of one CPU. I will replace these estimates with the real figures from the billing page.
