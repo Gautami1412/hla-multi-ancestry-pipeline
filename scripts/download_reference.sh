@@ -1,50 +1,47 @@
 #!/usr/bin/env bash
-# Downloads the GRCh38 reference FASTA, dbSNP, and Mills/1000G gold-standard
-# indels — the shared, one-time resources needed by BQSR and variant calling.
-# These are standard GATK resource bundle files hosted publicly by the
-# Broad Institute. ~3-4 GB total; run once, then reuse (or push to S3).
+# Downloads the shared reference files: Broad's hg38 FASTA, dbSNP build 138
+# and the Mills/1000G gold-standard indels. Run once, then keep the files in S3.
+#
+# The FASTA still contains the *_alt contigs. Run
+# scripts/make_no_alt_reference.sh afterwards to remove them.
+#
+# Needs bgzip and tabix (both come with the samtools conda environment).
 set -euo pipefail
 
 OUTDIR="resources/reference"
 mkdir -p "$OUTDIR"
 
-# NOTE: the original "genomics-public-data" bucket now 403s for anonymous
-# callers (Google migrated public GATK resources here some time ago).
 BASE="https://storage.googleapis.com/gcp-public-data--broad-references/hg38/v0"
-# Pre-built BWA index for this exact FASTA — pulling these avoids running
-# `bwa index` locally (memory-heavy: ~5-6GB RSS for the full GRCh38 genome).
-EBI="http://ftp.1000genomes.ebi.ac.uk/vol1/ftp/technical/reference/GRCh38_reference_genome"
 
-echo "==> Reference FASTA (+ index + dict)"
-curl -L -o "${OUTDIR}/GRCh38_full_analysis_set_plus_decoy_hla.fa" \
-  "${BASE}/Homo_sapiens_assembly38.fasta"
-curl -L -o "${OUTDIR}/GRCh38_full_analysis_set_plus_decoy_hla.fa.fai" \
-  "${BASE}/Homo_sapiens_assembly38.fasta.fai"
-curl -L -o "${OUTDIR}/GRCh38_full_analysis_set_plus_decoy_hla.dict" \
-  "${BASE}/Homo_sapiens_assembly38.dict"
+# Download a file unless it is already there, and retry if the connection drops.
+fetch() {
+  local out="$1" url="$2"
+  if [[ -s "$out" ]]; then
+    echo "already have $out"
+    return 0
+  fi
+  curl -L --fail --retry 5 --retry-delay 5 -o "${out}.part" "$url"
+  mv "${out}.part" "$out"
+}
 
-echo "==> Pre-built BWA index (skips local bwa index)"
-for ext in amb ann bwt pac sa; do
-  curl -L -o "${OUTDIR}/GRCh38_full_analysis_set_plus_decoy_hla.fa.${ext}" \
-    "${EBI}/GRCh38_full_analysis_set_plus_decoy_hla.fa.${ext}"
-done
+echo "==> Reference FASTA"
+fetch "${OUTDIR}/Homo_sapiens_assembly38.fasta" "${BASE}/Homo_sapiens_assembly38.fasta"
 
-echo "==> dbSNP"
-curl -L -o "${OUTDIR}/dbsnp_146.hg38.vcf" "${BASE}/Homo_sapiens_assembly38.dbsnp138.vcf"
-gzip -f "${OUTDIR}/dbsnp_146.hg38.vcf"
-curl -L -o "${OUTDIR}/dbsnp_146.hg38.vcf.gz.tbi" "${BASE}/Homo_sapiens_assembly38.dbsnp138.vcf.idx" || true
+echo "==> dbSNP build 138"
+if [[ ! -s "${OUTDIR}/dbsnp_138.hg38.vcf.gz.tbi" ]]; then
+  fetch "${OUTDIR}/dbsnp_138.hg38.vcf" "${BASE}/Homo_sapiens_assembly38.dbsnp138.vcf"
+  # GATK needs bgzip, not plain gzip, so it can jump around inside the file.
+  bgzip -f "${OUTDIR}/dbsnp_138.hg38.vcf"
+  tabix -f -p vcf "${OUTDIR}/dbsnp_138.hg38.vcf.gz"
+fi
 
 echo "==> Mills/1000G gold-standard indels"
-curl -L -o "${OUTDIR}/Mills_and_1000G_gold_standard.indels.hg38.vcf.gz" \
+fetch "${OUTDIR}/Mills_and_1000G_gold_standard.indels.hg38.vcf.gz" \
   "${BASE}/Mills_and_1000G_gold_standard.indels.hg38.vcf.gz"
-curl -L -o "${OUTDIR}/Mills_and_1000G_gold_standard.indels.hg38.vcf.gz.tbi" \
+fetch "${OUTDIR}/Mills_and_1000G_gold_standard.indels.hg38.vcf.gz.tbi" \
   "${BASE}/Mills_and_1000G_gold_standard.indels.hg38.vcf.gz.tbi"
 
-echo "==> Done. Verify checksums / file sizes look sane before proceeding:"
+echo "==> Done"
 ls -lh "$OUTDIR"
-
-echo ""
-echo "NOTE: Broad occasionally reorganizes this bucket's layout. If any curl"
-echo "above 404s, get the current path from:"
-echo "https://console.cloud.google.com/storage/browser/genomics-public-data/resources/broad/hg38/v0"
-echo "or the GATK resource bundle docs: https://gatk.broadinstitute.org/hc/en-us/articles/360035890811"
+echo "If a download gives a 404, Broad has moved the file. The current paths are listed at"
+echo "https://gatk.broadinstitute.org/hc/en-us/articles/360035890811"
