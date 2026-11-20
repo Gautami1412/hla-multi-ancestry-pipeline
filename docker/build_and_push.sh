@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Build the pipeline image and push it to your AWS ECR repo, so AWS Batch
-# jobs can pull it. Run this from the repo root:
+# Builds the pipeline image and pushes it to my AWS ECR repo so AWS Batch can
+# pull it. In practice I let GitHub Actions do this (.github/workflows/docker.yml)
+# because my laptop cannot build the image reliably. This script does the same
+# thing on a machine that has Docker. Run it from the repo root:
 #   bash docker/build_and_push.sh
 set -euo pipefail
 
@@ -26,9 +28,8 @@ aws ecr get-login-password --region "${AWS_REGION}" \
 echo "==> Building image"
 docker build -t "${ECR_REPO}:latest" -f docker/Dockerfile .
 
-echo "==> Tagging + pushing to ${ECR_URI}:latest"
+echo "==> Tagging and pushing to ${ECR_URI}:latest"
 docker tag "${ECR_REPO}:latest" "${ECR_URI}:latest"
 docker push "${ECR_URI}:latest"
 
-echo "==> Done. Image URI (needed by aws/register_batch_job.sh):"
-echo "${ECR_URI}:latest"
+echo "==> Done. Image: ${ECR_URI}:latest"
